@@ -3,6 +3,7 @@ import os
 
 from dotenv import load_dotenv
 from consumer import MessageConsumer
+from snowflake import SnowflakeUploader
 
 load_dotenv()
 
@@ -24,11 +25,29 @@ if __name__ == "__main__":
     }
 
     consumer = None
+    
+    user = os.getenv("user")
+    password = os.getenv("password")
+    account = os.getenv("account")
+    warehouse = os.getenv("warehouse")
+    database = os.getenv("database")
+    schema = os.getenv("schema")
+
+    snowflake_config = {
+        'user': user,
+        'password': password,
+        'account': account,
+        'warehouse': warehouse,
+        'database': database,
+        'schema': schema
+    }
+    
     try:
         # Initialize and run the consumer
-        consumer = MessageConsumer(**config)
+        consumer = MessageConsumer(snowflake_config, **config)
         logging.info("Starting to consume the messages")
         consumer.consume_and_embed_messages()
+        
     except KeyboardInterrupt:
         print("Stopping the consumer...")
     except Exception as e:
