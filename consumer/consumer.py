@@ -2,14 +2,15 @@ from kafka import KafkaConsumer
 import json
 from typing import List, Optional, Callable, Dict
 import logging
-from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 import os
-from dotenv import load_dotenv
-from snowflake import SnowflakeUploader
+# import sys
+# sys.path.append("/")
+from snowflake_uploader import SnowflakeUploader
 
-
+# from dotenv import load_dotenv
 class MessageConsumer:
     def __init__(
             self,
