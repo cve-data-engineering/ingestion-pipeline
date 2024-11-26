@@ -2,6 +2,8 @@ import logging
 import os
 from dotenv import load_dotenv
 from consumer import MessageConsumer
+from processor import SnowflakeUploader
+
 
 load_dotenv()
 
@@ -19,6 +21,16 @@ if __name__ == "__main__":
         'group_id': 'cve-consumer-group',
         'openai_api_key': os.getenv("OPENAI_API_KEY"),
         'index_name': 'cve-index'
+    }
+
+    password = os.getenv("password")
+    snowflake_config = {
+        'user': 'FERRET',
+        'password': password,
+        'account': 'urb63596',
+        'warehouse': 'TEST_CVE_WAREHOUSE',
+        'database': 'test_cve',
+        'schema': 'PUBLIC'
     }
 
     consumer = None

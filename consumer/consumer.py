@@ -2,19 +2,17 @@ from kafka import KafkaConsumer
 import json
 from typing import List, Optional, Callable, Dict
 import logging
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 import os
-# import sys
-# sys.path.append("/")
-from snowflake_uploader import SnowflakeUploader
+from dotenv import load_dotenv
+from processor import SnowflakeUploader
 
-# from dotenv import load_dotenv
+
 class MessageConsumer:
     def __init__(
             self,
-            snowflake_config,
             topics: List[str],
             bootstrap_servers: List[str],
             group_id: str,
@@ -64,7 +62,7 @@ class MessageConsumer:
                     metric="cosine",
                     spec=ServerlessSpec(
                         cloud='aws',
-                        region='us-east-1'  # Changed to us-east-1
+                        region='us-east-1'
                     )
                 )
             self.vector_store = PineconeVectorStore(
@@ -138,7 +136,7 @@ class MessageConsumer:
                 for topic_partition, messages in message_batch.items():
                     for message in messages:
                         self.snowflake_uploader.upload_json_to_snowflake(message.value)
-                        self.process_and_store_embedding(message)
+                        # self.process_and_store_embedding(message)
 
         except Exception as e:
             self.logger.error(f"Error consuming messages: {str(e)}")
@@ -151,5 +149,4 @@ class MessageConsumer:
         if hasattr(self, 'consumer'):
             self.consumer.close()
             self.logger.info("Consumer closed")
-            
-    
+
