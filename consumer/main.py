@@ -3,6 +3,8 @@ import os
 
 from dotenv import load_dotenv
 from consumer import MessageConsumer
+from processor import SnowflakeUploader
+
 
 load_dotenv()
 
@@ -23,10 +25,20 @@ if __name__ == "__main__":
         'index_name': 'cve-index'
     }
 
+    password = os.getenv("password")
+    snowflake_config = {
+        'user': 'FERRET',
+        'password': password,
+        'account': 'urb63596',
+        'warehouse': 'TEST_CVE_WAREHOUSE',
+        'database': 'test_cve',
+        'schema': 'PUBLIC'
+    }
+
     consumer = None
     try:
         # Initialize and run the consumer
-        consumer = MessageConsumer(**config)
+        consumer = MessageConsumer(snowflake_config, **config)
         logging.info("Starting to consume the messages")
         consumer.consume_and_embed_messages()
     except KeyboardInterrupt:

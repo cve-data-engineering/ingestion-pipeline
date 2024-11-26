@@ -7,11 +7,13 @@ from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 import os
 from dotenv import load_dotenv
+from processor import SnowflakeUploader
 
 
 class MessageConsumer:
     def __init__(
             self,
+            snowflake_config,
             topics: List[str],
             bootstrap_servers: List[str],
             group_id: str,
@@ -19,11 +21,13 @@ class MessageConsumer:
             openai_api_key: str,
             index_name: str = "cve-index",
             auto_offset_reset: str = 'earliest',
-            enable_auto_commit: bool = True
+            enable_auto_commit: bool = True,
+
     ):
         self.logger = logging.getLogger(__name__)
         self.topics = topics
         self.index_name = index_name
+        self.snowflake_uploader = SnowflakeUploader(snowflake_config)
 
         # Initialize Pinecone
         self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
@@ -61,7 +65,7 @@ class MessageConsumer:
                     metric="cosine",
                     spec=ServerlessSpec(
                         cloud='aws',
-                        region='us-east-1'  # Changed to us-east-1
+                        region='us-east-1'
                     )
                 )
             self.vector_store = PineconeVectorStore(
@@ -134,7 +138,8 @@ class MessageConsumer:
 
                 for topic_partition, messages in message_batch.items():
                     for message in messages:
-                        self.process_and_store_embedding(message)
+                        self.snowflake_uploader.upload_json_to_snowflake(message.value)
+                        # self.process_and_store_embedding(message)
 
         except Exception as e:
             self.logger.error(f"Error consuming messages: {str(e)}")
