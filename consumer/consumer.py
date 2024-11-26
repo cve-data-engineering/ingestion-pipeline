@@ -2,28 +2,31 @@ from kafka import KafkaConsumer
 import json
 from typing import List, Optional, Callable, Dict
 import logging
-from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 import os
-from dotenv import load_dotenv
+# import sys
+# sys.path.append("/")
+from snowflake_uploader import SnowflakeUploader
 
-
+# from dotenv import load_dotenv
 class MessageConsumer:
     def __init__(
             self,
+            snowflake_config,
             topics: List[str],
             bootstrap_servers: List[str],
             group_id: str,
-            pinecone_api_key: str,
             openai_api_key: str,
             index_name: str = "cve-index",
             auto_offset_reset: str = 'earliest',
-            enable_auto_commit: bool = True
+            enable_auto_commit: bool = True,
     ):
         self.logger = logging.getLogger(__name__)
         self.topics = topics
         self.index_name = index_name
+        self.snowflake_uploader = SnowflakeUploader(snowflake_config)
 
         # Initialize Pinecone
         self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
@@ -134,6 +137,7 @@ class MessageConsumer:
 
                 for topic_partition, messages in message_batch.items():
                     for message in messages:
+                        self.snowflake_uploader.upload_json_to_snowflake(message.value)
                         self.process_and_store_embedding(message)
 
         except Exception as e:
@@ -147,3 +151,5 @@ class MessageConsumer:
         if hasattr(self, 'consumer'):
             self.consumer.close()
             self.logger.info("Consumer closed")
+            
+    
