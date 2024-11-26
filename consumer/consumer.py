@@ -13,16 +13,13 @@ from processor import SnowflakeUploader
 class MessageConsumer:
     def __init__(
             self,
-            snowflake_config,
             topics: List[str],
             bootstrap_servers: List[str],
             group_id: str,
-            pinecone_api_key: str,
             openai_api_key: str,
             index_name: str = "cve-index",
             auto_offset_reset: str = 'earliest',
             enable_auto_commit: bool = True,
-
     ):
         self.logger = logging.getLogger(__name__)
         self.topics = topics
@@ -152,3 +149,4 @@ class MessageConsumer:
         if hasattr(self, 'consumer'):
             self.consumer.close()
             self.logger.info("Consumer closed")
+
