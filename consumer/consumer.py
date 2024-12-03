@@ -136,7 +136,7 @@ class MessageConsumer:
                 for topic_partition, messages in message_batch.items():
                     for message in messages:
                         self.snowflake_uploader.upload_json_to_snowflake(message.value)
-                        # self.process_and_store_embedding(message)
+                        self.process_and_store_embedding(message)
 
         except Exception as e:
             self.logger.error(f"Error consuming messages: {str(e)}")
@@ -149,4 +149,3 @@ class MessageConsumer:
         if hasattr(self, 'consumer'):
             self.consumer.close()
             self.logger.info("Consumer closed")
-

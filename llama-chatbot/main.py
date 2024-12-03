@@ -35,7 +35,8 @@ class CVEVerificationAgent:
             api_key=os.getenv("OPENAI_API_KEY")
         )
         Settings.embed_model = OpenAIEmbedding(
-            api_key=os.getenv("OPENAI_API_KEY")
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="text-embedding-ada-002",
         )
 
         # Initialize vector store
@@ -148,10 +149,9 @@ class CVEVerificationAgent:
         try:
             # Query vector store
             vector_results = self.query_engine.query(f"Tell me about {cve_id}")
-
             # Fetch NVD data
             nvd_data = self.fetch_nvd_data(cve_id)
-
+            print(nvd_data)
             if not vector_results and not nvd_data:
                 return {
                     "status": "error",
@@ -298,6 +298,7 @@ def format_technology_response(response_data):
 
     return formatted_response
 
+
 def format_response(response_data):
     """Format the verification and mitigation response"""
     if not response_data:
@@ -326,6 +327,7 @@ def format_response(response_data):
             formatted_response += f"- {ref}\n"
 
     return formatted_response
+
 
 def format_langchain_response(response_data):
     """Format the LangChain response"""
@@ -377,7 +379,6 @@ def main():
     #             st.warning("Please enter a technology query")
 
     with tab2:
-        # Keep existing CVE ID lookup functionality
         cve_id = st.text_input("Enter CVE ID (e.g., CVE-2024-1234):")
         if st.button("Analyze CVE"):
             if cve_id:
@@ -409,6 +410,7 @@ def main():
                         st.markdown(format_langchain_response(response_data))
             else:
                 st.warning("Please enter a query.")
+
 
 if __name__ == "__main__":
     main()

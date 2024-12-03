@@ -14,32 +14,32 @@ load_dotenv()
 
 class CVEChatbot:
     def __init__(self):
-        # Initialize Pinecone
         self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 
-        # Initialize embeddings
-        self.embeddings = OpenAIEmbeddings(api_key=os.getenv("OPENAI_API_KEY"))
+        # Explicitly specify the embedding model
+        self.embeddings = OpenAIEmbeddings(
+            model="text-embedding-ada-002",
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
 
-        # Initialize LLM
         self.llm = ChatOpenAI(
             model_name="gpt-3.5-turbo",
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )
 
-        # Initialize vector store
         self.vector_store = PineconeVectorStore(
             index_name="cve-index",
             embedding=self.embeddings
         )
 
-        # Create memory
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
-            return_messages=True
+            return_messages=True,
+            output_key="answer",
+            input_key="question"
         )
 
-        # Initialize RAG prompt
         self.qa_prompt = PromptTemplate(
             template="""You are a cybersecurity expert assistant. Use the following pieces of context to answer the question at the end. 
             If you don't know the answer, just say that you don't know. Try to be specific and provide technical details when available.
@@ -52,7 +52,6 @@ class CVEChatbot:
             input_variables=["context", "question"]
         )
 
-        # Initialize the RAG chain
         self.qa_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.vector_store.as_retriever(
@@ -60,16 +59,38 @@ class CVEChatbot:
                 search_kwargs={"k": 5}
             ),
             memory=self.memory,
-            combine_docs_chain_kwargs={"prompt": self.qa_prompt}
+            combine_docs_chain_kwargs={"prompt": self.qa_prompt},
+            return_source_documents=True,
+            chain_type="stuff"
         )
 
     def get_response(self, query: str):
         """Get response using RAG"""
         try:
+            # First, get the query embedding to verify the model
+            query_embedding = self.embeddings.embed_query(query)
+            print(f"\nQuery Embedding Length: {len(query_embedding)}")  # Should be 1536 for ada-002
+
+            # Get similar documents directly from vector store first
+            similar_docs = self.vector_store.similarity_search_with_score(
+                query=query,
+                k=5
+            )
+
+            # Print top 5 matches with similarity scores
+            print("\nTop 5 Similar Documents:")
+            for doc, score in similar_docs:
+                print(f"\nScore: {score}")
+                print(f"CVE ID: {doc.metadata.get('cve_id')}")
+                print(f"Text: {doc.page_content[:200]}...")  # Print first 200 chars
+
+            # Get RAG response
             response = self.qa_chain({"question": query})
+
             return {
                 "answer": response["answer"],
-                "source_documents": response.get("source_documents", [])
+                "source_documents": response["source_documents"],
+                "similar_docs": similar_docs  # Include similarity search results
             }
         except Exception as e:
             st.error(f"Error getting response: {str(e)}")
@@ -84,8 +105,19 @@ def format_response(response_data):
     formatted_response = f"""
     **Answer**: {response_data['answer']}
 
-    **Source Documents**:
+    **Top Matches (with similarity scores)**:
     """
+
+    # Add similarity search results
+    for doc, score in response_data.get('similar_docs', []):
+        formatted_response += f"""
+        ---
+        **Similarity Score**: {score:.4f}
+        **CVE ID**: {doc.metadata.get('cve_id')}
+        **Text**: {doc.page_content[:200]}...
+        """
+
+    formatted_response += "\n\n**Source Documents Used in Response**:"
 
     for doc in response_data.get('source_documents', []):
         metadata = doc.metadata
