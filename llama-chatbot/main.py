@@ -157,6 +157,12 @@ class CVEVerificationAgent:
                     "status": "error",
                     "message": f"No information found for {cve_id}"
                 }
+            # Calculate base confidence score
+            base_confidence_score = self.calculate_confidence_score(vector_results, nvd_data)
+            # Calculate LLM-based confidence score
+            llm_confidence_score = self.assess_verification_with_llm(vector_results, nvd_data)
+            # Combine scores with weights (70% base, 30% LLM)
+            final_confidence_score = round(0.7 * base_confidence_score + 0.3 * llm_confidence_score, 2)
 
             # Get mitigation strategies
             mitigation_info = self.get_mitigation_strategies(nvd_data) if nvd_data else None
@@ -168,7 +174,7 @@ class CVEVerificationAgent:
                 "nvd_data": nvd_data,
                 "mitigation": mitigation_info,
                 "verification_status": "verified" if vector_results and nvd_data else "partial",
-                "confidence_score": 1.0 if vector_results and nvd_data else 0.5
+                "confidence_score": final_confidence_score
             }
 
             return verification_result
@@ -178,6 +184,29 @@ class CVEVerificationAgent:
                 "status": "error",
                 "message": f"Error during verification: {str(e)}"
             }
+
+
+    def calculate_confidence_score(self, vector_results, nvd_data):
+        """Calculate base confidence score"""
+        base_score = 0.5
+
+        if vector_results:
+            base_score += 0.25
+
+        if nvd_data:
+            key_fields = ['vulnerabilities', 'descriptions', 'metrics']
+            completeness_score = sum(1 for field in key_fields if field in nvd_data) / len(key_fields)
+            base_score += completeness_score * 0.25
+
+        return min(1.0, max(0.0, base_score))
+
+    def assess_verification_with_llm(self, vector_results, nvd_data):
+        """Calculate LLM-based confidence score"""
+        vector_score = len(str(vector_results).split()) / 100 if vector_results else 0
+        nvd_score = len(str(nvd_data).split()) / 100 if nvd_data else 0
+
+        combined_score = 0.6 * vector_score + 0.4 * nvd_score
+        return min(1.0, max(0.0, combined_score))
 
     async def process_technology_query(self, query: str):
         """Process natural language query about technology vulnerabilities"""
