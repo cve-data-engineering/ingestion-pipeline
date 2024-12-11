@@ -41,60 +41,102 @@ class CVEChatbot:
         )
 
         self.qa_prompt = PromptTemplate(
-            template="""You are a cybersecurity expert assistant. Use the following pieces of context to answer the question at the end. 
-            If you don't know the answer, just say that you don't know. Try to be specific and provide technical details when available.
+            template="""You are a cybersecurity expert assistant specializing in CVE analysis and mitigation strategies. 
 
-            Context: {context}
+                    Use the following pieces of context to provide a detailed analysis of the CVE in question. Your response should include:
+                    1. A clear description of the vulnerability
+                    2. The severity and impact assessment
+                    3. Specific technical details about the vulnerability
+                    4. Step-by-step mitigation strategies
+                    5. Additional security recommendations
 
-            Question: {question}
+                    If the CVE exists but specific details are limited, provide general security recommendations based on the vulnerability type.
 
-            Answer the question based on the context provided. Include relevant CVE IDs, severity levels, and technical details in your response:""",
+                    Context: {context}
+
+                    Question: {question}
+
+                    Provide a comprehensive response including all available technical details and practical mitigation steps:""",
             input_variables=["context", "question"]
         )
 
         self.qa_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.vector_store.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": 5}
+                search_type="similarity_score_threshold",
+                search_kwargs={
+                    "k": 8,
+                    "score_threshold": 0.7
+                }
             ),
             memory=self.memory,
-            combine_docs_chain_kwargs={"prompt": self.qa_prompt},
+            combine_docs_chain_kwargs={
+                "prompt": self.qa_prompt,
+                "document_separator": "\n\n"
+            },
+            chain_type="stuff",
             return_source_documents=True,
-            chain_type="stuff"
+            verbose=True
         )
 
     def get_response(self, query: str):
-        """Get response using RAG"""
         try:
-            # First, get the query embedding to verify the model
-            query_embedding = self.embeddings.embed_query(query)
-            print(f"\nQuery Embedding Length: {len(query_embedding)}")  # Should be 1536 for ada-002
-
-            # Get similar documents directly from vector store first
-            similar_docs = self.vector_store.similarity_search_with_score(
-                query=query,
-                k=5
-            )
-
-            # Print top 5 matches with similarity scores
-            print("\nTop 5 Similar Documents:")
-            for doc, score in similar_docs:
-                print(f"\nScore: {score}")
-                print(f"CVE ID: {doc.metadata.get('cve_id')}")
-                print(f"Text: {doc.page_content[:200]}...")  # Print first 200 chars
+            # Enhance query with CVE context
+            enhanced_query = self._enhance_query(query)
 
             # Get RAG response
-            response = self.qa_chain({"question": query})
+            response = self.qa_chain({"question": enhanced_query})
+
+            # If response indicates no information, try fallback strategy
+            if "no information available" in response["answer"].lower():
+                fallback_response = self._get_fallback_response(query)
+                if fallback_response:
+                    response["answer"] = fallback_response
 
             return {
                 "answer": response["answer"],
                 "source_documents": response["source_documents"],
-                "similar_docs": similar_docs  # Include similarity search results
+                "similar_docs": self._get_similar_docs(query)
             }
         except Exception as e:
             st.error(f"Error getting response: {str(e)}")
             return None
+
+    def _enhance_query(self, query: str):
+        """Enhance the query with additional context"""
+        if "CVE-" in query:
+            return f"{query} Include technical details, severity, and specific mitigation steps if available."
+        return query
+
+    def _get_similar_docs(self, query: str, k=5):
+        """Get similar documents with improved scoring"""
+        return self.vector_store.similarity_search_with_score(
+            query=query,
+            k=k,
+            filter={"score": {"$gt": 0.5}}
+        )
+
+    def _get_fallback_response(self, query: str):
+        """Provide fallback response for cases with limited information"""
+        cve_pattern = r'CVE-\d{4}-\d+'
+        import re
+
+        cve_match = re.search(cve_pattern, query)
+        if not cve_match:
+            return None
+
+        cve_id = cve_match.group(0)
+
+        # Try to get basic information about the CVE type
+        basic_info = self.vector_store.similarity_search(
+            f"What type of vulnerability is {cve_id}?",
+            k=3
+        )
+
+        if basic_info:
+            return f"While detailed information about {cve_id} is limited, based on similar vulnerabilities, here are recommended security practices and mitigation strategies..."
+
+        return None
 
 
 def format_response(response_data):

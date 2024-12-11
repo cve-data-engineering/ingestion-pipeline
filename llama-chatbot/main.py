@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from chatbot.main import CVEChatbot
+from scanner.scan import ContainerAnalyzer
 
 load_dotenv()
 
@@ -389,23 +390,41 @@ def main():
         st.session_state.agent = CVEVerificationAgent()
     if 'langchain_agent' not in st.session_state:
         st.session_state.langchain_agent = CVEChatbot()
+    if 'container_analyzer' not in st.session_state:
+        st.session_state.container_analyzer = ContainerAnalyzer()
 
     # Add tabs for different query types
-    # tab1, tab2, tab3 = st.tabs(["Technology Query", "CVE Lookup", "Technology Query with Langchain"])
-    tab2, tab3 = st.tabs(["CVE Lookup", "Technology Query with Langchain"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Container Scanner", "CVE Lookup", "Technology Query with LangChain"])
 
-    # with tab1:
-    #     query = st.text_area(
-    #         "Describe your technology or security concern:",
-    #         placeholder="Example: What are the security vulnerabilities in MongoDB and how can I protect against them?"
-    #     )
-    #     if st.button("Analyze Technology"):
-    #         if query:
-    #             with st.spinner("Analyzing technology vulnerabilities..."):
-    #                 result = asyncio.run(st.session_state.agent.process_technology_query(query))
-    #                 st.markdown(format_technology_response(result))
-    #         else:
-    #             st.warning("Please enter a technology query")
+    with tab1:
+        st.subheader("Container Image Vulnerability Scanner")
+
+        # Input for container image
+        image_name = st.text_input(
+            "Enter container image name:",
+            placeholder="Example: python:3.9-slim"
+        )
+
+        if st.button("Scan Container"):
+            if image_name:
+                with st.spinner("Scanning container image..."):
+                    # Analyze the image
+                    if st.session_state.container_analyzer.analyze_image(image_name):
+                        # Get vulnerabilities
+                        vulnerabilities = st.session_state.container_analyzer.list_vulnerabilities(image_name)
+
+                        if vulnerabilities:
+                            st.success(f"Found {len(vulnerabilities)} CVEs in {image_name}")
+                            st.markdown("### Vulnerabilities Found:")
+                            for cve_id in vulnerabilities:
+                                st.markdown(f"- {cve_id}")
+                        else:
+                            st.success("No vulnerabilities found in the image")
+                    else:
+                        st.error("Failed to analyze container image")
+            else:
+                st.warning("Please enter a container image name")
 
     with tab2:
         cve_id = st.text_input("Enter CVE ID (e.g., CVE-2024-1234):")
@@ -416,23 +435,19 @@ def main():
                     st.markdown(format_response(result))
             else:
                 st.warning("Please enter a CVE ID")
+
     with tab3:
         st.subheader("Technology Query with LangChain")
-
-        # Chat input
         user_query = st.text_input(
             "Ask about CVEs:",
             key="langchain_input",
             placeholder="Ask any question about CVEs, vulnerabilities, or security concerns..."
         )
 
-        # Search button for LangChain query
         if st.button("Send", key="langchain_send"):
             if user_query:
                 with st.spinner("Processing your query..."):
-                    # Get response from LangChain agent
                     response_data = st.session_state.langchain_agent.get_response(user_query)
-
                     if response_data:
                         st.markdown("### Response")
                         st.markdown(f"**Query**: {user_query}")

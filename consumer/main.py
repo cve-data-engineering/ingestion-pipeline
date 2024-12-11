@@ -17,10 +17,10 @@ if __name__ == "__main__":
     # Configuration
     config = {
         'topics': ['cve'],
-        'bootstrap_servers': ['10.0.0.223:9092'],
+        'bootstrap_servers': ['localhost:9092'],
         'group_id': 'cve-consumer-group',
         'openai_api_key': os.getenv("OPENAI_API_KEY"),
-        'index_name': 'cve-index'
+        'index_name': 'cve-index-2'
     }
 
     password = os.getenv("password")
@@ -53,9 +53,9 @@ if __name__ == "__main__":
     
     try:
         # Initialize and run the consumer
-        consumer = MessageConsumer(snowflake_config, **config)
+        consumer = MessageConsumer(**config)
         logging.info("Starting to consume the messages")
-        # consumer.consume_and_embed_messages()
+        consumer.consume_and_embed_messages()
         
     except KeyboardInterrupt:
         print("Stopping the consumer...")
