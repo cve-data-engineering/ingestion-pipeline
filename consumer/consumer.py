@@ -17,14 +17,14 @@ class MessageConsumer:
             bootstrap_servers: List[str],
             group_id: str,
             openai_api_key: str,
-            index_name: str = "cve-index",
+            index_name: str = "cve-index-2",
             auto_offset_reset: str = 'earliest',
             enable_auto_commit: bool = True,
     ):
         self.logger = logging.getLogger(__name__)
         self.topics = topics
         self.index_name = index_name
-        self.snowflake_uploader = SnowflakeUploader(snowflake_config)
+        # self.snowflake_uploader = SnowflakeUploader(snowflake_config)
 
         # Initialize Pinecone
         self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
@@ -135,8 +135,8 @@ class MessageConsumer:
 
                 for topic_partition, messages in message_batch.items():
                     for message in messages:
-                        self.snowflake_uploader.upload_json_to_snowflake(message.value)
-                        # self.process_and_store_embedding(message)
+                        # self.snowflake_uploader.upload_json_to_snowflake(message.value)
+                        self.process_and_store_embedding(message)
 
         except Exception as e:
             self.logger.error(f"Error consuming messages: {str(e)}")
@@ -147,6 +147,5 @@ class MessageConsumer:
     def close(self):
         """Close the consumer connection"""
         if hasattr(self, 'consumer'):
-            self.consumer.close()
+            # self.consumer.close()
             self.logger.info("Consumer closed")
-

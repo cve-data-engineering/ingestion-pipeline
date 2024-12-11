@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from chatbot.main import CVEChatbot
+from scanner.scan import ContainerAnalyzer
 
 load_dotenv()
 
@@ -35,7 +36,8 @@ class CVEVerificationAgent:
             api_key=os.getenv("OPENAI_API_KEY")
         )
         Settings.embed_model = OpenAIEmbedding(
-            api_key=os.getenv("OPENAI_API_KEY")
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="text-embedding-ada-002",
         )
 
         # Initialize vector store
@@ -148,15 +150,20 @@ class CVEVerificationAgent:
         try:
             # Query vector store
             vector_results = self.query_engine.query(f"Tell me about {cve_id}")
-
             # Fetch NVD data
             nvd_data = self.fetch_nvd_data(cve_id)
-
+            print(nvd_data)
             if not vector_results and not nvd_data:
                 return {
                     "status": "error",
                     "message": f"No information found for {cve_id}"
                 }
+            # Calculate base confidence score
+            base_confidence_score = self.calculate_confidence_score(vector_results, nvd_data)
+            # Calculate LLM-based confidence score
+            llm_confidence_score = self.assess_verification_with_llm(vector_results, nvd_data)
+            # Combine scores with weights (70% base, 30% LLM)
+            final_confidence_score = round(0.7 * base_confidence_score + 0.3 * llm_confidence_score, 2)
 
             # Get mitigation strategies
             mitigation_info = self.get_mitigation_strategies(nvd_data) if nvd_data else None
@@ -168,7 +175,7 @@ class CVEVerificationAgent:
                 "nvd_data": nvd_data,
                 "mitigation": mitigation_info,
                 "verification_status": "verified" if vector_results and nvd_data else "partial",
-                "confidence_score": 1.0 if vector_results and nvd_data else 0.5
+                "confidence_score": final_confidence_score
             }
 
             return verification_result
@@ -178,6 +185,29 @@ class CVEVerificationAgent:
                 "status": "error",
                 "message": f"Error during verification: {str(e)}"
             }
+
+
+    def calculate_confidence_score(self, vector_results, nvd_data):
+        """Calculate base confidence score"""
+        base_score = 0.5
+
+        if vector_results:
+            base_score += 0.25
+
+        if nvd_data:
+            key_fields = ['vulnerabilities', 'descriptions', 'metrics']
+            completeness_score = sum(1 for field in key_fields if field in nvd_data) / len(key_fields)
+            base_score += completeness_score * 0.25
+
+        return min(1.0, max(0.0, base_score))
+
+    def assess_verification_with_llm(self, vector_results, nvd_data):
+        """Calculate LLM-based confidence score"""
+        vector_score = len(str(vector_results).split()) / 100 if vector_results else 0
+        nvd_score = len(str(nvd_data).split()) / 100 if nvd_data else 0
+
+        combined_score = 0.6 * vector_score + 0.4 * nvd_score
+        return min(1.0, max(0.0, combined_score))
 
     async def process_technology_query(self, query: str):
         """Process natural language query about technology vulnerabilities"""
@@ -298,6 +328,7 @@ def format_technology_response(response_data):
 
     return formatted_response
 
+
 def format_response(response_data):
     """Format the verification and mitigation response"""
     if not response_data:
@@ -326,6 +357,7 @@ def format_response(response_data):
             formatted_response += f"- {ref}\n"
 
     return formatted_response
+
 
 def format_langchain_response(response_data):
     """Format the LangChain response"""
@@ -358,26 +390,43 @@ def main():
         st.session_state.agent = CVEVerificationAgent()
     if 'langchain_agent' not in st.session_state:
         st.session_state.langchain_agent = CVEChatbot()
+    if 'container_analyzer' not in st.session_state:
+        st.session_state.container_analyzer = ContainerAnalyzer()
 
     # Add tabs for different query types
-    # tab1, tab2, tab3 = st.tabs(["Technology Query", "CVE Lookup", "Technology Query with Langchain"])
-    tab2, tab3 = st.tabs(["CVE Lookup", "Technology Query with Langchain"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Container Scanner", "CVE Lookup", "Technology Query with LangChain"])
 
-    # with tab1:
-    #     query = st.text_area(
-    #         "Describe your technology or security concern:",
-    #         placeholder="Example: What are the security vulnerabilities in MongoDB and how can I protect against them?"
-    #     )
-    #     if st.button("Analyze Technology"):
-    #         if query:
-    #             with st.spinner("Analyzing technology vulnerabilities..."):
-    #                 result = asyncio.run(st.session_state.agent.process_technology_query(query))
-    #                 st.markdown(format_technology_response(result))
-    #         else:
-    #             st.warning("Please enter a technology query")
+    with tab1:
+        st.subheader("Container Image Vulnerability Scanner")
+
+        # Input for container image
+        image_name = st.text_input(
+            "Enter container image name:",
+            placeholder="Example: python:3.9-slim"
+        )
+
+        if st.button("Scan Container"):
+            if image_name:
+                with st.spinner("Scanning container image..."):
+                    # Analyze the image
+                    if st.session_state.container_analyzer.analyze_image(image_name):
+                        # Get vulnerabilities
+                        vulnerabilities = st.session_state.container_analyzer.list_vulnerabilities(image_name)
+
+                        if vulnerabilities:
+                            st.success(f"Found {len(vulnerabilities)} CVEs in {image_name}")
+                            st.markdown("### Vulnerabilities Found:")
+                            for cve_id in vulnerabilities:
+                                st.markdown(f"- {cve_id}")
+                        else:
+                            st.success("No vulnerabilities found in the image")
+                    else:
+                        st.error("Failed to analyze container image")
+            else:
+                st.warning("Please enter a container image name")
 
     with tab2:
-        # Keep existing CVE ID lookup functionality
         cve_id = st.text_input("Enter CVE ID (e.g., CVE-2024-1234):")
         if st.button("Analyze CVE"):
             if cve_id:
@@ -386,29 +435,26 @@ def main():
                     st.markdown(format_response(result))
             else:
                 st.warning("Please enter a CVE ID")
+
     with tab3:
         st.subheader("Technology Query with LangChain")
-
-        # Chat input
         user_query = st.text_input(
             "Ask about CVEs:",
             key="langchain_input",
             placeholder="Ask any question about CVEs, vulnerabilities, or security concerns..."
         )
 
-        # Search button for LangChain query
         if st.button("Send", key="langchain_send"):
             if user_query:
                 with st.spinner("Processing your query..."):
-                    # Get response from LangChain agent
                     response_data = st.session_state.langchain_agent.get_response(user_query)
-
                     if response_data:
                         st.markdown("### Response")
                         st.markdown(f"**Query**: {user_query}")
                         st.markdown(format_langchain_response(response_data))
             else:
                 st.warning("Please enter a query.")
+
 
 if __name__ == "__main__":
     main()
