@@ -20,8 +20,9 @@ import threading
 import zipfile
 from dotenv import load_dotenv
 
-from chatbot.main import CVEChatbot
+# from chatbot.main import CVEChatbot
 from scanner.scan import ContainerAnalyzer
+from chatbot.llama_index_chatbot import CVEChatBotLlama
 
 load_dotenv()
 # Global variable to store image URLs
@@ -363,28 +364,32 @@ def format_response(response_data):
     return formatted_response
 
 
+# def format_langchain_response(response_data):
+#     """Format the LangChain response"""
+#     if not response_data:
+#         return ""
+
+#     formatted_response = f"""
+#     **Assistant**: {response_data['answer']}
+
+#     **Sources**:
+#     """
+
+#     for doc in response_data.get('source_documents', []):
+#         metadata = doc.metadata
+#         formatted_response += f"""
+#         ---
+#         **CVE ID**: {metadata.get('cve_id', 'N/A')}
+#         **Severity**: {metadata.get('severity', 'N/A')}
+#         **CVSS Score**: {metadata.get('score', 'N/A')}
+#         **Published**: {metadata.get('published_date', 'N/A')}
+#         """
+
+#     return formatted_response
+
 def format_langchain_response(response_data):
-    """Format the LangChain response"""
-    if not response_data:
-        return ""
-
-    formatted_response = f"""
-    **Assistant**: {response_data['answer']}
-
-    **Sources**:
-    """
-
-    for doc in response_data.get('source_documents', []):
-        metadata = doc.metadata
-        formatted_response += f"""
-        ---
-        **CVE ID**: {metadata.get('cve_id', 'N/A')}
-        **Severity**: {metadata.get('severity', 'N/A')}
-        **CVSS Score**: {metadata.get('score', 'N/A')}
-        **Published**: {metadata.get('published_date', 'N/A')}
-        """
-
-    return formatted_response
+    # If response_data is just a string, no indexing into keys:
+    return f"**Assistant**: {response_data}"
 
 
 def fetch_workflow_id(repo, token, workflow_name):
@@ -501,97 +506,15 @@ def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-eng
         
     except Exception as e:
         print(f"Error: {e}")
-        
 
-        
-        
-# # Function to fetch and update image URLs
-# def update_image_urls(file_path="image_urls.txt"):
-#     global image_urls
-#     try:
-#         with open(file_path, "r") as file:
-#             # Read and update the global image_urls list
-#             image_urls = [line.strip() for line in file.readlines()]
-#     except FileNotFoundError:
-#         print("image_urls.txt not found. Retrying...")
-#     except Exception as e:
-#         print(f"Error reading image_urls.txt: {e}")
-        
-# # Function to fetch the latest artifact dynamically
-# def download_latest_image_urls(repo, token, workflow_name, artifact_name, output_file="image_urls.txt"):
-#     try:
-#         # GitHub API URL to list workflow runs
-#         workflows_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_name}/runs"
-
-#         # Request headers with authorization
-#         headers = {
-#             "Authorization": f"Bearer {token}",
-#             "Accept": "application/vnd.github.v3+json"
-#         }
-
-#         # Fetch the list of workflow runs
-#         response = requests.get(workflows_url, headers=headers)
-#         response.raise_for_status()
-#         runs = response.json()["workflow_runs"]
-
-#         # Find the latest successful run
-#         latest_run = next((run for run in runs if run["conclusion"] == "success"), None)
-#         if not latest_run:
-#             print("No successful workflow runs found.")
-#             return
-
-#         # Get the artifacts for the latest run
-#         run_id = latest_run["id"]
-#         artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
-#         artifacts_response = requests.get(artifacts_url, headers=headers)
-#         artifacts_response.raise_for_status()
-#         artifacts = artifacts_response.json()["artifacts"]
-
-#         # Find the artifact by name
-#         artifact = next((a for a in artifacts if artifact_name in a["name"]), None)
-#         if not artifact:
-#             print(f"Artifact '{artifact_name}' not found in the latest run.")
-#             return
-
-#         # Download the artifact
-#         download_url = artifact["archive_download_url"]
-#         artifact_response = requests.get(download_url, headers=headers)
-#         artifact_response.raise_for_status()
-
-#         # Save the artifact locally
-#         with open(output_file, "wb") as file:
-#             file.write(artifact_response.content)
-
-#         print(f"Downloaded and updated {output_file}.")
-#     except Exception as e:
-#         print(f"Error downloading artifact: {e}")
-
-# # Background job to periodically fetch the latest artifact
-# def background_fetch_urls(interval=60, repo="cve-data-engineering/ingestion-pipeline", workflow_name="build-and-push.yml", artifact_name="image-urls"):
-#     while True:
-#         # Replace with your GitHub token
-#         github_token = os.getenv("GITHUB_TOKEN")
-#         if not github_token:
-#             print("GitHub token not found in environment variables.")
-#             return
-
-#         download_latest_image_urls(repo, github_token, workflow_name, artifact_name)
-#         # Update the image_urls list
-#         update_image_urls()
-
-#         time.sleep(interval)
-
-        
 def main():
-    # Start a background thread to fetch URLs periodically
-    # threading.Thread(target=download_latest_artifact, daemon=True).start()
-    
     st.title("Technology Vulnerability Analysis Assistant")
 
     if 'agent' not in st.session_state:
         st.session_state.agent = CVEVerificationAgent()
     if 'langchain_agent' not in st.session_state:
-        st.session_state.langchain_agent = CVEChatbot()
+        # st.session_state.langchain_agent = CVEChatbot()
+        st.session_state.langchain_agent = CVEChatBotLlama()
     if 'container_analyzer' not in st.session_state:
         st.session_state.container_analyzer = ContainerAnalyzer()
 
@@ -621,13 +544,7 @@ def main():
             )
         else:
             image_name = selected_image
-
-        # # Input for container image
-        # image_name = st.text_input(
-        #     "Enter container image name:",
-        #     placeholder="Example: python:3.9-slim"
-        # )
-
+            
         if st.button("Scan Container"):
             if image_name:
                 with st.spinner("Scanning container image..."):
@@ -669,7 +586,7 @@ def main():
         if st.button("Send", key="langchain_send"):
             if user_query:
                 with st.spinner("Processing your query..."):
-                    response_data = st.session_state.langchain_agent.get_response(user_query)
+                    response_data = st.session_state.  langchain_agent.get_response(user_query)
                     if response_data:
                         st.markdown("### Response")
                         st.markdown(f"**Query**: {user_query}")
