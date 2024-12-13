@@ -1,0 +1,5 @@
+# Use the official BusyBox image as the base
+FROM busybox
+
+# Set the default command to execute when the container starts
+CMD ["sh"]
