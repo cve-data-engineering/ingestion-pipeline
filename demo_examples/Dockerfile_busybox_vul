@@ -1,0 +1,8 @@
+FROM alpine:3.9
+
+# This version of Alpine uses BusyBox 1.29.3, which has known vulnerabilities
+RUN apk --no-cache add busybox=1.29.3-r10
+
+# Set BusyBox as the entrypoint
+ENTRYPOINT ["/bin/busybox"]
+CMD ["sh"]

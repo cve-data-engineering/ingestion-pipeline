@@ -15,13 +15,17 @@ from pinecone import Pinecone
 import requests
 from bs4 import BeautifulSoup
 import os
+import time
+import threading
+import zipfile
 from dotenv import load_dotenv
 
 from chatbot.main import CVEChatbot
 from scanner.scan import ContainerAnalyzer
 
 load_dotenv()
-
+# Global variable to store image URLs
+image_urls = []
 
 class CVEVerificationAgent:
     def __init__(self):
@@ -383,7 +387,205 @@ def format_langchain_response(response_data):
     return formatted_response
 
 
+def fetch_workflow_id(repo, token, workflow_name):
+    """Fetch the workflow ID based on the workflow name."""
+    workflows_url = f"https://api.github.com/repos/{repo}/actions/workflows"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.get(workflows_url, headers=headers)
+    response.raise_for_status()
+
+    workflows = response.json()["workflows"]
+    for workflow in workflows:
+        if workflow["name"] == workflow_name or workflow["path"].endswith(workflow_name):
+            return workflow["id"]
+    
+    raise ValueError(f"Workflow '{workflow_name}' not found in repository '{repo}'.")
+
+def fetch_latest_successful_run(repo, token, workflow_id):
+    """Fetch the latest successful run for a specific workflow."""
+    runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_id}/runs"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.get(runs_url, headers=headers)
+    response.raise_for_status()
+
+    runs = response.json()["workflow_runs"]
+    for run in runs:
+        if run["conclusion"] == "success":
+            return run["id"]
+    
+    raise ValueError("No successful runs found for the specified workflow.")
+
+def fetch_artifact(repo, token, run_id, artifact_name, output_dir="artifacts", output_file="image_urls.txt"):
+    """Fetch and download a specific artifact from a workflow run."""
+    artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.get(artifacts_url, headers=headers)
+    response.raise_for_status()
+
+    artifacts = response.json()["artifacts"]
+    for artifact in artifacts:
+        if artifact["name"] == artifact_name:
+            download_url = artifact["archive_download_url"]
+            artifact_response = requests.get(download_url, headers=headers)
+            artifact_response.raise_for_status()
+            
+            
+            # Save the downloaded ZIP file
+            zip_file_path = f"{output_dir}/{artifact_name}.zip"
+            os.makedirs(output_dir, exist_ok=True)
+            with open(zip_file_path, "wb") as zip_file:
+                zip_file.write(artifact_response.content)
+
+            print(f"Artifact '{artifact_name}' downloaded as ZIP to {zip_file_path}.")
+
+            # Unzip the file
+            with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+                zip_ref.extractall(output_dir)
+
+            print(f"Artifact '{artifact_name}' unzipped to {output_dir}.")
+
+            # Check if the expected file exists
+            extracted_file_path = os.path.join(output_dir, output_file)
+            if os.path.exists(extracted_file_path):
+                print(f"File '{output_file}' is available for use.")
+            else:
+                print(f"Expected file '{output_file}' not found in the artifact.")
+            return extracted_file_path
+    
+    raise ValueError(f"Artifact '{artifact_name}' not found in the run.")
+
+def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-engineering/ingestion-pipeline", workflow_name="Build and List Demo Docker Images", artifact_name="image-urls", output_file="image_urls.txt", output_dir="artifacts"):
+    """Fetch and download the artifact of the latest successful workflow run."""
+    try:
+        # Step 1: Fetch workflow ID
+        workflow_id = fetch_workflow_id(repo, token, workflow_name)
+        print(f"Workflow ID for '{workflow_name}': {workflow_id}")
+
+        # Step 2: Fetch the latest successful run ID
+        run_id = fetch_latest_successful_run(repo, token, workflow_id)
+        print(f"Latest successful run ID: {run_id}")
+
+        # Step 3: Fetch and download the artifact
+        # fetch_artifact(repo, token, run_id, artifact_name, output_file)
+        
+        # Step 3: Fetch, unzip, and extract the artifact
+        extracted_file_path = fetch_artifact(
+            repo=repo,
+            token=token,
+            run_id=run_id,
+            artifact_name=artifact_name,
+            output_file=output_file,
+            output_dir=output_dir
+        )
+        
+        # Step 4: Process the extracted file
+        if extracted_file_path and os.path.exists(extracted_file_path):
+            with open(extracted_file_path, "r") as file:
+                image_urls = [line.strip() for line in file.readlines()]
+                print(f"Processed image URLs: {image_urls}")
+            return image_urls
+        else:
+            raise FileNotFoundError(f"Extracted file '{output_file}' not found in directory '{output_dir}'.")
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        
+
+        
+        
+# # Function to fetch and update image URLs
+# def update_image_urls(file_path="image_urls.txt"):
+#     global image_urls
+#     try:
+#         with open(file_path, "r") as file:
+#             # Read and update the global image_urls list
+#             image_urls = [line.strip() for line in file.readlines()]
+#     except FileNotFoundError:
+#         print("image_urls.txt not found. Retrying...")
+#     except Exception as e:
+#         print(f"Error reading image_urls.txt: {e}")
+        
+# # Function to fetch the latest artifact dynamically
+# def download_latest_image_urls(repo, token, workflow_name, artifact_name, output_file="image_urls.txt"):
+#     try:
+#         # GitHub API URL to list workflow runs
+#         workflows_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_name}/runs"
+
+#         # Request headers with authorization
+#         headers = {
+#             "Authorization": f"Bearer {token}",
+#             "Accept": "application/vnd.github.v3+json"
+#         }
+
+#         # Fetch the list of workflow runs
+#         response = requests.get(workflows_url, headers=headers)
+#         response.raise_for_status()
+#         runs = response.json()["workflow_runs"]
+
+#         # Find the latest successful run
+#         latest_run = next((run for run in runs if run["conclusion"] == "success"), None)
+#         if not latest_run:
+#             print("No successful workflow runs found.")
+#             return
+
+#         # Get the artifacts for the latest run
+#         run_id = latest_run["id"]
+#         artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+#         artifacts_response = requests.get(artifacts_url, headers=headers)
+#         artifacts_response.raise_for_status()
+#         artifacts = artifacts_response.json()["artifacts"]
+
+#         # Find the artifact by name
+#         artifact = next((a for a in artifacts if artifact_name in a["name"]), None)
+#         if not artifact:
+#             print(f"Artifact '{artifact_name}' not found in the latest run.")
+#             return
+
+#         # Download the artifact
+#         download_url = artifact["archive_download_url"]
+#         artifact_response = requests.get(download_url, headers=headers)
+#         artifact_response.raise_for_status()
+
+#         # Save the artifact locally
+#         with open(output_file, "wb") as file:
+#             file.write(artifact_response.content)
+
+#         print(f"Downloaded and updated {output_file}.")
+#     except Exception as e:
+#         print(f"Error downloading artifact: {e}")
+
+# # Background job to periodically fetch the latest artifact
+# def background_fetch_urls(interval=60, repo="cve-data-engineering/ingestion-pipeline", workflow_name="build-and-push.yml", artifact_name="image-urls"):
+#     while True:
+#         # Replace with your GitHub token
+#         github_token = os.getenv("GITHUB_TOKEN")
+#         if not github_token:
+#             print("GitHub token not found in environment variables.")
+#             return
+
+#         download_latest_image_urls(repo, github_token, workflow_name, artifact_name)
+#         # Update the image_urls list
+#         update_image_urls()
+
+#         time.sleep(interval)
+
+        
 def main():
+    # Start a background thread to fetch URLs periodically
+    # threading.Thread(target=download_latest_artifact, daemon=True).start()
+    
     st.title("Technology Vulnerability Analysis Assistant")
 
     if 'agent' not in st.session_state:
@@ -399,12 +601,32 @@ def main():
 
     with tab1:
         st.subheader("Container Image Vulnerability Scanner")
-
-        # Input for container image
-        image_name = st.text_input(
-            "Enter container image name:",
-            placeholder="Example: python:3.9-slim"
+        
+        # Fetch and process the latest artifact
+        image_urls = download_latest_artifact()
+        
+        # Dropdown for selecting a pre-defined image
+        selected_image = st.selectbox(
+            "Select a Docker image from the list:",
+            options=["Enter Manually"] + image_urls,
+            help="Select an image from the list or choose 'Enter Manually' to input a custom image URL."
         )
+        
+        # Input field for manual image entry, shown only if 'Enter Manually' is selected
+        image_name = ""
+        if selected_image == "Enter Manually":
+            image_name = st.text_input(
+                "Enter container image name:",
+                placeholder="Example: python:3.9-slim"
+            )
+        else:
+            image_name = selected_image
+
+        # # Input for container image
+        # image_name = st.text_input(
+        #     "Enter container image name:",
+        #     placeholder="Example: python:3.9-slim"
+        # )
 
         if st.button("Scan Container"):
             if image_name:
