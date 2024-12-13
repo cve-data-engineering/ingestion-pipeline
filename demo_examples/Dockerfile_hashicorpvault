@@ -1,0 +1,4 @@
+FROM hashicorp/vault:1.13.3
+EXPOSE 8200
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["server","-dev"]
