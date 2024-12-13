@@ -1,0 +1,10 @@
+FROM registry.suse.com/suse/sle15:15.3
+
+# Refresh repositories
+RUN zypper refresh
+
+# Install the fixed version of BusyBox (1.34.1-4.9.1 or higher)
+RUN zypper install -y busybox=1.34.1-4.9.1
+
+# The container now contains a patched version of BusyBox.
+# Add any additional steps or configuration as needed.

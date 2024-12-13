@@ -1,0 +1,11 @@
+FROM registry.suse.com/suse/sle15:15.3
+
+# Refresh repositories
+RUN zypper refresh
+
+# Install a BusyBox version older than the fixed 1.34.1-4.9.1
+# For example, if 1.34.1-4.9.0 (or lower) is vulnerable:
+RUN zypper install -y busybox=1.34.1-4.9.0
+
+# The container now contains a vulnerable version of BusyBox.
+# Add any additional steps or configuration as needed.
