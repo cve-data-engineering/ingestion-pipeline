@@ -19,14 +19,15 @@ import time
 import threading
 import zipfile
 from dotenv import load_dotenv
-
-# from chatbot.main import CVEChatbot
+from chatbot_pg.main import VectorEmbeddingCreator
+from chatbot.main import CVEChatbot
 from scanner.scan import ContainerAnalyzer
 from chatbot.llama_index_chatbot import CVEChatBotLlama
 
 load_dotenv()
 # Global variable to store image URLs
 image_urls = []
+
 
 class CVEVerificationAgent:
     def __init__(self):
@@ -47,7 +48,7 @@ class CVEVerificationAgent:
 
         # Initialize vector store
         self.vector_store = PineconeVectorStore(
-            pinecone_index=self.pc.Index("cve-index"),
+            pinecone_index=self.pc.Index("cve-index-2"),
             embedding_dimension=1536
         )
 
@@ -190,7 +191,6 @@ class CVEVerificationAgent:
                 "status": "error",
                 "message": f"Error during verification: {str(e)}"
             }
-
 
     def calculate_confidence_score(self, vector_results, nvd_data):
         """Calculate base confidence score"""
@@ -363,6 +363,7 @@ def format_response(response_data):
 
     return formatted_response
 
+
 def format_langchain_response(response_data):
     # If response_data is just a string, no indexing into keys:
     return f"**Assistant**: {response_data}"
@@ -383,8 +384,9 @@ def fetch_workflow_id(repo, token, workflow_name):
     for workflow in workflows:
         if workflow["name"] == workflow_name or workflow["path"].endswith(workflow_name):
             return workflow["id"]
-    
+
     raise ValueError(f"Workflow '{workflow_name}' not found in repository '{repo}'.")
+
 
 def fetch_latest_successful_run(repo, token, workflow_id):
     """Fetch the latest successful run for a specific workflow."""
@@ -401,8 +403,9 @@ def fetch_latest_successful_run(repo, token, workflow_id):
     for run in runs:
         if run["conclusion"] == "success":
             return run["id"]
-    
+
     raise ValueError("No successful runs found for the specified workflow.")
+
 
 def fetch_artifact(repo, token, run_id, artifact_name, output_dir="artifacts", output_file="image_urls.txt"):
     """Fetch and download a specific artifact from a workflow run."""
@@ -421,8 +424,7 @@ def fetch_artifact(repo, token, run_id, artifact_name, output_dir="artifacts", o
             download_url = artifact["archive_download_url"]
             artifact_response = requests.get(download_url, headers=headers)
             artifact_response.raise_for_status()
-            
-            
+
             # Save the downloaded ZIP file
             zip_file_path = f"{output_dir}/{artifact_name}.zip"
             os.makedirs(output_dir, exist_ok=True)
@@ -444,10 +446,13 @@ def fetch_artifact(repo, token, run_id, artifact_name, output_dir="artifacts", o
             else:
                 print(f"Expected file '{output_file}' not found in the artifact.")
             return extracted_file_path
-    
+
     raise ValueError(f"Artifact '{artifact_name}' not found in the run.")
 
-def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-engineering/ingestion-pipeline", workflow_name="Build and List Demo Docker Images", artifact_name="image-urls", output_file="image_urls.txt", output_dir="artifacts"):
+
+def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-engineering/ingestion-pipeline",
+                             workflow_name="Build and List Demo Docker Images", artifact_name="image-urls",
+                             output_file="image_urls.txt", output_dir="artifacts"):
     """Fetch and download the artifact of the latest successful workflow run."""
     try:
         # Step 1: Fetch workflow ID
@@ -460,7 +465,7 @@ def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-eng
 
         # Step 3: Fetch and download the artifact
         # fetch_artifact(repo, token, run_id, artifact_name, output_file)
-        
+
         # Step 3: Fetch, unzip, and extract the artifact
         extracted_file_path = fetch_artifact(
             repo=repo,
@@ -470,7 +475,7 @@ def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-eng
             output_file=output_file,
             output_dir=output_dir
         )
-        
+
         # Step 4: Process the extracted file
         if extracted_file_path and os.path.exists(extracted_file_path):
             with open(extracted_file_path, "r") as file:
@@ -479,27 +484,39 @@ def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-eng
             return image_urls
         else:
             raise FileNotFoundError(f"Extracted file '{output_file}' not found in directory '{output_dir}'.")
-        
+
     except Exception as e:
         print(f"Error: {e}")
+
 
 def main():
     st.title("Technology Vulnerability Analysis Assistant")
 
+    # Initialize all session state variables
     if 'agent' not in st.session_state:
         st.session_state.agent = CVEVerificationAgent()
     if 'langchain_agent' not in st.session_state:
         st.session_state.langchain_agent = CVEChatBotLlama()
     if 'container_analyzer' not in st.session_state:
         st.session_state.container_analyzer = ContainerAnalyzer()
+    if 'vec_creator' not in st.session_state:
+        st.session_state.vec_creator = VectorEmbeddingCreator()
     # Maintain a history in session_state for the queries and responses
     if 'langchain_history' not in st.session_state:
         st.session_state.langchain_history = []
     if "container_scan_history" not in st.session_state:
         st.session_state.container_scan_history = []
 
+    if 'cve_search_history' not in st.session_state:
+        st.session_state.cve_search_history = []
 
-    tab1, tab2, tab3 = st.tabs(["Container Scanner", "CVE Lookup", "Technology Query with LangChain"])
+    # Add tabs for different query types
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Container Scanner",
+        "CVE Lookup",
+        "Technology Query with LangChain",
+        "CVE Search Engine Chat"
+    ])
 
     with tab1:
         st.subheader("Container Image Vulnerability Scanner")
@@ -547,7 +564,7 @@ def main():
                         st.markdown(f"- {cve_id}")
                 else:
                     st.success(f"No vulnerabilities found in {img}")
-                    
+
     with tab2:
         cve_id = st.text_input("Enter CVE ID (e.g., CVE-2024-1234):")
         if st.button("Analyze CVE"):
@@ -582,6 +599,35 @@ def main():
             for q, r in st.session_state.langchain_history:
                 st.markdown(f"**Query**: {q}")
                 st.markdown(format_langchain_response(r))
+    with tab4:
+        st.subheader("CVE Search Engine Chat")
+
+        user_query = st.text_input("Enter your CVE-related query:", key="cve_search_input")
+
+        if st.button("Search", key="cve_search_send"):
+            if user_query:
+                with st.spinner("Searching for CVE information..."):
+                    result = st.session_state.vec_creator.search_embeddings(user_query)
+
+                    # Store the query and result in history (newest last)
+                    st.session_state.cve_search_history.append((user_query, result))
+            else:
+                st.warning("Please enter a query.")
+
+        # Display the search history in reverse (newest first)
+        if st.session_state.cve_search_history:
+            st.markdown("### CVE Search History")
+            reversed_history = list(reversed(st.session_state.cve_search_history))
+
+            for i, (query, result) in enumerate(reversed_history):
+                if i > 0:  # Add a divider before all but the first entry
+                    st.divider()
+                st.markdown(f"**Query**: {query}")
+                if result:
+                    st.markdown(f"**Answer**: {result}")
+                else:
+                    st.warning("No relevant CVE information found.")
+
 
 if __name__ == "__main__":
     main()
