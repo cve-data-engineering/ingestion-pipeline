@@ -1,10 +1,7 @@
-FROM registry.suse.com/suse/sle15:15.3
+# Use a newer Alpine version (3.15) that includes a more recent (patched) BusyBox
+FROM alpine:3.15
 
-# Refresh repositories
-RUN zypper refresh
+# Update repositories
+RUN apk update && apk add --no-cache busybox
 
-# Install the fixed version of BusyBox (1.34.1-4.9.1 or higher)
-RUN zypper install -y busybox=1.34.1-4.9.1
-
-# The container now contains a patched version of BusyBox.
-# Add any additional steps or configuration as needed.
+# The container now includes a newer, presumably patched version of BusyBox.

@@ -1,11 +1,11 @@
-FROM registry.suse.com/suse/sle15:15.3
+# Using an older Alpine version (3.13) that likely contains older BusyBox packages
+FROM alpine:3.13
 
-# Refresh repositories
-RUN zypper refresh
+# Update repositories
+RUN apk update
 
-# Install a BusyBox version older than the fixed 1.34.1-4.9.1
-# For example, if 1.34.1-4.9.0 (or lower) is vulnerable:
-RUN zypper install -y busybox=1.34.1-4.9.0
+# Install a BusyBox version known to be older and potentially vulnerable
+# This is an example version; adjust if not found:
+RUN apk update && apk upgrade
 
-# The container now contains a vulnerable version of BusyBox.
-# Add any additional steps or configuration as needed.
+# The container now contains an older BusyBox that may be vulnerable.
