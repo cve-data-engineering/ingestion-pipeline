@@ -1,0 +1,7 @@
+# Using an older Alpine version (3.13) that likely contains older BusyBox packages
+FROM alpine:3.13
+
+# Update repositories
+RUN apk update
+
+RUN apk update && apk upgrade
