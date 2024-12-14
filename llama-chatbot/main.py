@@ -363,30 +363,6 @@ def format_response(response_data):
 
     return formatted_response
 
-
-# def format_langchain_response(response_data):
-#     """Format the LangChain response"""
-#     if not response_data:
-#         return ""
-
-#     formatted_response = f"""
-#     **Assistant**: {response_data['answer']}
-
-#     **Sources**:
-#     """
-
-#     for doc in response_data.get('source_documents', []):
-#         metadata = doc.metadata
-#         formatted_response += f"""
-#         ---
-#         **CVE ID**: {metadata.get('cve_id', 'N/A')}
-#         **Severity**: {metadata.get('severity', 'N/A')}
-#         **CVSS Score**: {metadata.get('score', 'N/A')}
-#         **Published**: {metadata.get('published_date', 'N/A')}
-#         """
-
-#     return formatted_response
-
 def format_langchain_response(response_data):
     # If response_data is just a string, no indexing into keys:
     return f"**Assistant**: {response_data}"
@@ -513,58 +489,65 @@ def main():
     if 'agent' not in st.session_state:
         st.session_state.agent = CVEVerificationAgent()
     if 'langchain_agent' not in st.session_state:
-        # st.session_state.langchain_agent = CVEChatbot()
         st.session_state.langchain_agent = CVEChatBotLlama()
     if 'container_analyzer' not in st.session_state:
         st.session_state.container_analyzer = ContainerAnalyzer()
+    # Maintain a history in session_state for the queries and responses
+    if 'langchain_history' not in st.session_state:
+        st.session_state.langchain_history = []
+    if "container_scan_history" not in st.session_state:
+        st.session_state.container_scan_history = []
 
-    # Add tabs for different query types
-    tab1, tab2, tab3 = st.tabs(
-        ["Container Scanner", "CVE Lookup", "Technology Query with LangChain"])
+
+    tab1, tab2, tab3 = st.tabs(["Container Scanner", "CVE Lookup", "Technology Query with LangChain"])
 
     with tab1:
         st.subheader("Container Image Vulnerability Scanner")
-        
-        # Fetch and process the latest artifact
+
         image_urls = download_latest_artifact()
-        
-        # Dropdown for selecting a pre-defined image
         selected_image = st.selectbox(
             "Select a Docker image from the list:",
             options=["Enter Manually"] + image_urls,
             help="Select an image from the list or choose 'Enter Manually' to input a custom image URL."
         )
-        
-        # Input field for manual image entry, shown only if 'Enter Manually' is selected
-        image_name = ""
+
+        image_name = selected_image if selected_image != "Enter Manually" else ""
         if selected_image == "Enter Manually":
             image_name = st.text_input(
                 "Enter container image name:",
                 placeholder="Example: python:3.9-slim"
             )
-        else:
-            image_name = selected_image
-            
+
         if st.button("Scan Container"):
             if image_name:
                 with st.spinner("Scanning container image..."):
-                    # Analyze the image
                     if st.session_state.container_analyzer.analyze_image(image_name):
-                        # Get vulnerabilities
                         vulnerabilities = st.session_state.container_analyzer.list_vulnerabilities(image_name)
-
-                        if vulnerabilities:
-                            st.success(f"Found {len(vulnerabilities)} CVEs in {image_name}")
-                            st.markdown("### Vulnerabilities Found:")
-                            for cve_id in vulnerabilities:
-                                st.markdown(f"- {cve_id}")
-                        else:
-                            st.success("No vulnerabilities found in the image")
+                        # Store results in session state (newest last)
+                        st.session_state.container_scan_history.append((image_name, vulnerabilities))
                     else:
-                        st.error("Failed to analyze container image")
+                        st.session_state.container_scan_history.append((image_name, None))
             else:
                 st.warning("Please enter a container image name")
 
+        # Display the scan history in reverse (newest first)
+        if st.session_state.container_scan_history:
+            st.markdown("### Container Scan History")
+            reversed_history = list(reversed(st.session_state.container_scan_history))
+
+            for i, (img, vulns) in enumerate(reversed_history):
+                if i > 0:  # Add a divider before all but the first entry
+                    st.divider()  # or st.markdown("---") if you prefer a markdown line
+                if vulns is None:
+                    st.error(f"Failed to analyze container image: {img}")
+                elif vulns:
+                    st.success(f"Found {len(vulns)} CVEs in {img}")
+                    st.markdown("### Vulnerabilities Found:")
+                    for cve_id in vulns:
+                        st.markdown(f"- {cve_id}")
+                else:
+                    st.success(f"No vulnerabilities found in {img}")
+                    
     with tab2:
         cve_id = st.text_input("Enter CVE ID (e.g., CVE-2024-1234):")
         if st.button("Analyze CVE"):
@@ -586,14 +569,19 @@ def main():
         if st.button("Send", key="langchain_send"):
             if user_query:
                 with st.spinner("Processing your query..."):
-                    response_data = st.session_state.  langchain_agent.get_response(user_query)
+                    response_data = st.session_state.langchain_agent.get_response(user_query)
                     if response_data:
-                        st.markdown("### Response")
-                        st.markdown(f"**Query**: {user_query}")
-                        st.markdown(format_langchain_response(response_data))
+                        # Store the query and response in history
+                        st.session_state.langchain_history.append((user_query, response_data))
             else:
                 st.warning("Please enter a query.")
 
+        # Display the entire conversation history
+        if st.session_state.langchain_history:
+            st.markdown("### Conversation History")
+            for q, r in st.session_state.langchain_history:
+                st.markdown(f"**Query**: {q}")
+                st.markdown(format_langchain_response(r))
 
 if __name__ == "__main__":
     main()

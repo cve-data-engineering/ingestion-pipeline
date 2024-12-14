@@ -1,7 +1,0 @@
-# Use a newer Alpine version (3.15) that includes a more recent (patched) BusyBox
-FROM alpine:3.15
-
-# Update repositories
-RUN apk update && apk add --no-cache busybox
-
-# The container now includes a newer, presumably patched version of BusyBox.

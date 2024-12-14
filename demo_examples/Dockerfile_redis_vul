@@ -1,6 +1,0 @@
-FROM redis:7.0.12
-EXPOSE 6379
-ENTRYPOINT ["redis-server"]
-CMD ["--protected-mode no"]
-
-#28425
