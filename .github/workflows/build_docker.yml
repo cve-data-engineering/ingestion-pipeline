@@ -25,13 +25,11 @@ jobs:
       - name: Build and push demo images
         run: |
           # Clean previous URL list
-          # rm -f image_urls.txt
+          rm -f image_urls.txt
 
           # Loop through demo Dockerfiles
           for file in demo_examples/Dockerfile_*; do
-            # Extract the base name of the Dockerfile (e.g., vuln1, fixed1)
             IMAGE_TYPE=$(basename $file | sed 's/Dockerfile_//')
-            # IMAGE_NAME="$DOCKER_USERNAME/cve:${IMAGE_TYPE}"
             IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/cve:${IMAGE_TYPE}"
             # Build and push the Docker image
             docker build -t $IMAGE_NAME -f $file .
