@@ -16,7 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 import os
 from dotenv import load_dotenv
-
+from chatbot_pg.main import VectorEmbeddingCreator
 from chatbot.main import CVEChatbot
 from scanner.scan import ContainerAnalyzer
 
@@ -42,7 +42,7 @@ class CVEVerificationAgent:
 
         # Initialize vector store
         self.vector_store = PineconeVectorStore(
-            pinecone_index=self.pc.Index("cve-index"),
+            pinecone_index=self.pc.Index("cve-index-2"),
             embedding_dimension=1536
         )
 
@@ -386,16 +386,30 @@ def format_langchain_response(response_data):
 def main():
     st.title("Technology Vulnerability Analysis Assistant")
 
+    # Initialize all session state variables
     if 'agent' not in st.session_state:
         st.session_state.agent = CVEVerificationAgent()
     if 'langchain_agent' not in st.session_state:
         st.session_state.langchain_agent = CVEChatbot()
     if 'container_analyzer' not in st.session_state:
         st.session_state.container_analyzer = ContainerAnalyzer()
+    if 'vec_creator' not in st.session_state:
+        st.session_state.vec_creator = VectorEmbeddingCreator()
+    # Initialize chat history
+    if 'requests' not in st.session_state:
+        st.session_state['requests'] = []
+    if 'responses' not in st.session_state:
+        st.session_state['responses'] = ["How can I assist you with CVE information?"]
+
 
     # Add tabs for different query types
-    tab1, tab2, tab3 = st.tabs(
-        ["Container Scanner", "CVE Lookup", "Technology Query with LangChain"])
+    # Add tabs for different query types
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Container Scanner",
+        "CVE Lookup",
+        "Technology Query with LangChain",
+        "CVE Search Engine Chat"
+    ])
 
     with tab1:
         st.subheader("Container Image Vulnerability Scanner")
@@ -451,9 +465,30 @@ def main():
                     if response_data:
                         st.markdown("### Response")
                         st.markdown(f"**Query**: {user_query}")
-                        st.markdown(format_langchain_response(response_data))
+                        # st.markdown(format_langchain_response(response_data))
+                        st.markdown(response_data)
             else:
                 st.warning("Please enter a query.")
+
+    with tab4:
+        st.subheader("CVE Search Engine Chat")
+
+        user_query = st.text_input("Enter your CVE-related query:", key="cve_search_input")
+
+        if st.button("Search", key="cve_search_send"):
+            if user_query:
+                with st.spinner("Searching for CVE information..."):
+                    result = st.session_state.vec_creator.search_embeddings(user_query)
+
+                    if result:
+                        st.markdown("### Response")
+                        st.markdown(f"**Query**: {user_query}")
+                        st.markdown(f"**Answer**: {result}")
+                    else:
+                        st.warning("Sorry, I couldn't find any relevant CVE information.")
+            else:
+                st.warning("Please enter a query.")
+
 
 
 if __name__ == "__main__":

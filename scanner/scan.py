@@ -22,12 +22,14 @@ class ContainerAnalyzer:
         # Generate SBOM using Syft
         sbom_result = syft_scan(image_name)
         if not sbom_result:
+            print(sbom_result)
             return False
         self.sbom_data[image_name] = sbom_result
 
         # Scan for vulnerabilities using Grype
         vuln_result = grype_scan(image_name)
         if not vuln_result:
+            print(vuln_result)
             return False
         self.vulnerability_data[image_name] = vuln_result
 
