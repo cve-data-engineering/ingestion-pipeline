@@ -15,12 +15,18 @@ from pinecone import Pinecone
 import requests
 from bs4 import BeautifulSoup
 import os
+import time
+import threading
+import zipfile
 from dotenv import load_dotenv
 from chatbot_pg.main import VectorEmbeddingCreator
 from chatbot.main import CVEChatbot
 from scanner.scan import ContainerAnalyzer
+from chatbot.llama_index_chatbot import CVEChatBotLlama
 
 load_dotenv()
+# Global variable to store image URLs
+image_urls = []
 
 
 class CVEVerificationAgent:
@@ -185,7 +191,6 @@ class CVEVerificationAgent:
                 "status": "error",
                 "message": f"Error during verification: {str(e)}"
             }
-
 
     def calculate_confidence_score(self, vector_results, nvd_data):
         """Calculate base confidence score"""
@@ -360,27 +365,128 @@ def format_response(response_data):
 
 
 def format_langchain_response(response_data):
-    """Format the LangChain response"""
-    if not response_data:
-        return ""
+    # If response_data is just a string, no indexing into keys:
+    return f"**Assistant**: {response_data}"
 
-    formatted_response = f"""
-    **Assistant**: {response_data['answer']}
 
-    **Sources**:
-    """
+def fetch_workflow_id(repo, token, workflow_name):
+    """Fetch the workflow ID based on the workflow name."""
+    workflows_url = f"https://api.github.com/repos/{repo}/actions/workflows"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
 
-    for doc in response_data.get('source_documents', []):
-        metadata = doc.metadata
-        formatted_response += f"""
-        ---
-        **CVE ID**: {metadata.get('cve_id', 'N/A')}
-        **Severity**: {metadata.get('severity', 'N/A')}
-        **CVSS Score**: {metadata.get('score', 'N/A')}
-        **Published**: {metadata.get('published_date', 'N/A')}
-        """
+    response = requests.get(workflows_url, headers=headers)
+    response.raise_for_status()
 
-    return formatted_response
+    workflows = response.json()["workflows"]
+    for workflow in workflows:
+        if workflow["name"] == workflow_name or workflow["path"].endswith(workflow_name):
+            return workflow["id"]
+
+    raise ValueError(f"Workflow '{workflow_name}' not found in repository '{repo}'.")
+
+
+def fetch_latest_successful_run(repo, token, workflow_id):
+    """Fetch the latest successful run for a specific workflow."""
+    runs_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_id}/runs"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.get(runs_url, headers=headers)
+    response.raise_for_status()
+
+    runs = response.json()["workflow_runs"]
+    for run in runs:
+        if run["conclusion"] == "success":
+            return run["id"]
+
+    raise ValueError("No successful runs found for the specified workflow.")
+
+
+def fetch_artifact(repo, token, run_id, artifact_name, output_dir="artifacts", output_file="image_urls.txt"):
+    """Fetch and download a specific artifact from a workflow run."""
+    artifacts_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.get(artifacts_url, headers=headers)
+    response.raise_for_status()
+
+    artifacts = response.json()["artifacts"]
+    for artifact in artifacts:
+        if artifact["name"] == artifact_name:
+            download_url = artifact["archive_download_url"]
+            artifact_response = requests.get(download_url, headers=headers)
+            artifact_response.raise_for_status()
+
+            # Save the downloaded ZIP file
+            zip_file_path = f"{output_dir}/{artifact_name}.zip"
+            os.makedirs(output_dir, exist_ok=True)
+            with open(zip_file_path, "wb") as zip_file:
+                zip_file.write(artifact_response.content)
+
+            print(f"Artifact '{artifact_name}' downloaded as ZIP to {zip_file_path}.")
+
+            # Unzip the file
+            with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+                zip_ref.extractall(output_dir)
+
+            print(f"Artifact '{artifact_name}' unzipped to {output_dir}.")
+
+            # Check if the expected file exists
+            extracted_file_path = os.path.join(output_dir, output_file)
+            if os.path.exists(extracted_file_path):
+                print(f"File '{output_file}' is available for use.")
+            else:
+                print(f"Expected file '{output_file}' not found in the artifact.")
+            return extracted_file_path
+
+    raise ValueError(f"Artifact '{artifact_name}' not found in the run.")
+
+
+def download_latest_artifact(token=os.getenv("GITHUB_TOKEN"), repo="cve-data-engineering/ingestion-pipeline",
+                             workflow_name="Build and List Demo Docker Images", artifact_name="image-urls",
+                             output_file="image_urls.txt", output_dir="artifacts"):
+    """Fetch and download the artifact of the latest successful workflow run."""
+    try:
+        # Step 1: Fetch workflow ID
+        workflow_id = fetch_workflow_id(repo, token, workflow_name)
+        print(f"Workflow ID for '{workflow_name}': {workflow_id}")
+
+        # Step 2: Fetch the latest successful run ID
+        run_id = fetch_latest_successful_run(repo, token, workflow_id)
+        print(f"Latest successful run ID: {run_id}")
+
+        # Step 3: Fetch and download the artifact
+        # fetch_artifact(repo, token, run_id, artifact_name, output_file)
+
+        # Step 3: Fetch, unzip, and extract the artifact
+        extracted_file_path = fetch_artifact(
+            repo=repo,
+            token=token,
+            run_id=run_id,
+            artifact_name=artifact_name,
+            output_file=output_file,
+            output_dir=output_dir
+        )
+
+        # Step 4: Process the extracted file
+        if extracted_file_path and os.path.exists(extracted_file_path):
+            with open(extracted_file_path, "r") as file:
+                image_urls = [line.strip() for line in file.readlines()]
+                print(f"Processed image URLs: {image_urls}")
+            return image_urls
+        else:
+            raise FileNotFoundError(f"Extracted file '{output_file}' not found in directory '{output_dir}'.")
+
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 def main():
@@ -390,19 +496,20 @@ def main():
     if 'agent' not in st.session_state:
         st.session_state.agent = CVEVerificationAgent()
     if 'langchain_agent' not in st.session_state:
-        st.session_state.langchain_agent = CVEChatbot()
+        st.session_state.langchain_agent = CVEChatBotLlama()
     if 'container_analyzer' not in st.session_state:
         st.session_state.container_analyzer = ContainerAnalyzer()
     if 'vec_creator' not in st.session_state:
         st.session_state.vec_creator = VectorEmbeddingCreator()
-    # Initialize chat history
-    if 'requests' not in st.session_state:
-        st.session_state['requests'] = []
-    if 'responses' not in st.session_state:
-        st.session_state['responses'] = ["How can I assist you with CVE information?"]
+    # Maintain a history in session_state for the queries and responses
+    if 'langchain_history' not in st.session_state:
+        st.session_state.langchain_history = []
+    if "container_scan_history" not in st.session_state:
+        st.session_state.container_scan_history = []
 
+    if 'cve_search_history' not in st.session_state:
+        st.session_state.cve_search_history = []
 
-    # Add tabs for different query types
     # Add tabs for different query types
     tab1, tab2, tab3, tab4 = st.tabs([
         "Container Scanner",
@@ -414,31 +521,49 @@ def main():
     with tab1:
         st.subheader("Container Image Vulnerability Scanner")
 
-        # Input for container image
-        image_name = st.text_input(
-            "Enter container image name:",
-            placeholder="Example: python:3.9-slim"
+        image_urls = download_latest_artifact()
+        selected_image = st.selectbox(
+            "Select a Docker image from the list:",
+            options=["Enter Manually"] + image_urls,
+            help="Select an image from the list or choose 'Enter Manually' to input a custom image URL."
         )
+
+        image_name = selected_image if selected_image != "Enter Manually" else ""
+        if selected_image == "Enter Manually":
+            image_name = st.text_input(
+                "Enter container image name:",
+                placeholder="Example: python:3.9-slim"
+            )
 
         if st.button("Scan Container"):
             if image_name:
                 with st.spinner("Scanning container image..."):
-                    # Analyze the image
                     if st.session_state.container_analyzer.analyze_image(image_name):
-                        # Get vulnerabilities
                         vulnerabilities = st.session_state.container_analyzer.list_vulnerabilities(image_name)
-
-                        if vulnerabilities:
-                            st.success(f"Found {len(vulnerabilities)} CVEs in {image_name}")
-                            st.markdown("### Vulnerabilities Found:")
-                            for cve_id in vulnerabilities:
-                                st.markdown(f"- {cve_id}")
-                        else:
-                            st.success("No vulnerabilities found in the image")
+                        # Store results in session state (newest last)
+                        st.session_state.container_scan_history.append((image_name, vulnerabilities))
                     else:
-                        st.error("Failed to analyze container image")
+                        st.session_state.container_scan_history.append((image_name, None))
             else:
                 st.warning("Please enter a container image name")
+
+        # Display the scan history in reverse (newest first)
+        if st.session_state.container_scan_history:
+            st.markdown("### Container Scan History")
+            reversed_history = list(reversed(st.session_state.container_scan_history))
+
+            for i, (img, vulns) in enumerate(reversed_history):
+                if i > 0:  # Add a divider before all but the first entry
+                    st.divider()  # or st.markdown("---") if you prefer a markdown line
+                if vulns is None:
+                    st.error(f"Failed to analyze container image: {img}")
+                elif vulns:
+                    st.success(f"Found {len(vulns)} CVEs in {img}")
+                    st.markdown("### Vulnerabilities Found:")
+                    for cve_id in vulns:
+                        st.markdown(f"- {cve_id}")
+                else:
+                    st.success(f"No vulnerabilities found in {img}")
 
     with tab2:
         cve_id = st.text_input("Enter CVE ID (e.g., CVE-2024-1234):")
@@ -463,13 +588,17 @@ def main():
                 with st.spinner("Processing your query..."):
                     response_data = st.session_state.langchain_agent.get_response(user_query)
                     if response_data:
-                        st.markdown("### Response")
-                        st.markdown(f"**Query**: {user_query}")
-                        # st.markdown(format_langchain_response(response_data))
-                        st.markdown(response_data)
+                        # Store the query and response in history
+                        st.session_state.langchain_history.append((user_query, response_data))
             else:
                 st.warning("Please enter a query.")
 
+        # Display the entire conversation history
+        if st.session_state.langchain_history:
+            st.markdown("### Conversation History")
+            for q, r in st.session_state.langchain_history:
+                st.markdown(f"**Query**: {q}")
+                st.markdown(format_langchain_response(r))
     with tab4:
         st.subheader("CVE Search Engine Chat")
 
@@ -480,15 +609,24 @@ def main():
                 with st.spinner("Searching for CVE information..."):
                     result = st.session_state.vec_creator.search_embeddings(user_query)
 
-                    if result:
-                        st.markdown("### Response")
-                        st.markdown(f"**Query**: {user_query}")
-                        st.markdown(f"**Answer**: {result}")
-                    else:
-                        st.warning("Sorry, I couldn't find any relevant CVE information.")
+                    # Store the query and result in history (newest last)
+                    st.session_state.cve_search_history.append((user_query, result))
             else:
                 st.warning("Please enter a query.")
 
+        # Display the search history in reverse (newest first)
+        if st.session_state.cve_search_history:
+            st.markdown("### CVE Search History")
+            reversed_history = list(reversed(st.session_state.cve_search_history))
+
+            for i, (query, result) in enumerate(reversed_history):
+                if i > 0:  # Add a divider before all but the first entry
+                    st.divider()
+                st.markdown(f"**Query**: {query}")
+                if result:
+                    st.markdown(f"**Answer**: {result}")
+                else:
+                    st.warning("No relevant CVE information found.")
 
 
 if __name__ == "__main__":
